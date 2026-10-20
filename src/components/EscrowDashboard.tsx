@@ -10,14 +10,6 @@ import { useToast } from '@/components/toast/ToastProvider';
 
 const short = (a: string) => (a.length > 14 ? `${a.slice(0, 6)}...${a.slice(-4)}` : a);
 
-const asContract = (payload: unknown): EscrowContract | null => {
-  if (!payload || typeof payload !== 'object') return null;
-  const obj = payload as { data?: EscrowContract; id?: number };
-  if (obj.data && typeof obj.data.id === 'number') return obj.data;
-  if (typeof obj.id === 'number') return payload as EscrowContract;
-  return null;
-};
-
 export function EscrowDashboard() {
   const router = useRouter();
   const pathname = usePathname();
@@ -95,7 +87,6 @@ export function EscrowDashboard() {
     setBusy(id);
     try {
       const result = await fn();
-      await load();
       onSuccess?.(result);
     } catch (e) {
       if (e instanceof ApiError && e.kind === 'aborted') return;
@@ -129,7 +120,7 @@ export function EscrowDashboard() {
           body: { title: form.title, client: form.client, freelancer: form.freelancer, milestones },
         }),
       (result) => {
-        const created = asContract(result);
+        const created = result as EscrowContract | null;
         if (created?.id) {
           toast.success(`Escrow #${created.id} created`, {
             action: { label: 'View escrow', onClick: () => viewEscrow(created.id) },
@@ -169,7 +160,7 @@ export function EscrowDashboard() {
 
       <div className="stack" style={{ minWidth: 0 }}>
         {error && (
-          <div className="alert alert-error" role="alert" title={error.detail}>
+          <div className="alert alert-error" role="alert">
             {error.message}
           </div>
         )}
@@ -242,11 +233,7 @@ export function EscrowDashboard() {
                     onClick={() =>
                       act(
                         c.id,
-                        () =>
-                          api(`/api/v1/contracts/${c.id}/deposit`, {
-                            method: 'POST',
-                            body: { amount: c.totalAmount - c.fundedAmount },
-                          }),
+                        () => run(c.id, 'deposit', { body: { amount: c.totalAmount - c.fundedAmount } }),
                         () => toast.success(`Escrow #${c.id} funded`),
                       )
                     }
@@ -261,7 +248,7 @@ export function EscrowDashboard() {
                     onClick={() =>
                       act(
                         c.id,
-                        () => api(`/api/v1/contracts/${c.id}/milestones/${next.index}/release`, { method: 'POST' }),
+                        () => run(c.id, 'release', { milestoneIndex: next.index }),
                         () => toast.success(`Escrow #${c.id}: milestone released`),
                       )
                     }
@@ -278,8 +265,7 @@ export function EscrowDashboard() {
                         act(
                           c.id,
                           () =>
-                            api(`/api/v1/contracts/${c.id}/dispute`, {
-                              method: 'POST',
+                            run(c.id, 'dispute', {
                               body: { raisedBy: c.client, reason: 'Raised from dashboard' },
                             }),
                           () => toast.success(`Escrow #${c.id} disputed`),
@@ -294,7 +280,7 @@ export function EscrowDashboard() {
                       onClick={() =>
                         act(
                           c.id,
-                          () => api(`/api/v1/contracts/${c.id}/cancel`, { method: 'POST' }),
+                          () => run(c.id, 'cancel'),
                           () => toast.success(`Escrow #${c.id} cancelled`),
                         )
                       }
@@ -310,7 +296,7 @@ export function EscrowDashboard() {
                     onClick={() =>
                       act(
                         c.id,
-                        () => api(`/api/v1/contracts/${c.id}/resolve`, { method: 'POST', body: { freelancerBps: 5000 } }),
+                        () => run(c.id, 'resolve', { body: { freelancerBps: 5000 } }),
                         () => toast.success(`Escrow #${c.id} resolved`),
                       )
                     }
@@ -329,7 +315,7 @@ export function EscrowDashboard() {
                         onClick={() =>
                           act(
                             c.id,
-                            () => api(`/api/v1/contracts/${c.id}/reputation`, { method: 'POST', body: { rating: r } }),
+                            () => run(c.id, 'reputation', { body: { rating: r } }),
                             () => toast.success(`Rating submitted for escrow #${c.id}`),
                           )
                         }
