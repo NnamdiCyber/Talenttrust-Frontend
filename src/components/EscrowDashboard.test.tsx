@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EscrowContract } from '@/lib/api';
 import { ToastProvider } from '@/components/toast/ToastProvider';
+import { SwrProvider } from '@/lib/swr';
 import { EscrowDashboard } from './EscrowDashboard';
 
 const fetchMock = vi.fn();
@@ -25,6 +26,15 @@ const contract = (over: Partial<EscrowContract> = {}): EscrowContract => ({
   ...over,
 });
 
+const released = contract({
+  fundedAmount: 1000,
+  releasedAmount: 300,
+  milestones: [
+    { index: 0, title: 'Design', amount: 300, released: true },
+    { index: 1, title: 'Build', amount: 700, released: false },
+  ],
+});
+
 const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body } as Response);
 const fail = (status: number, message: string) => ({
   ok: false,
@@ -32,14 +42,20 @@ const fail = (status: number, message: string) => ({
   json: async () => ({ message }),
 } as Response);
 
+const getCalls = () =>
+  fetchMock.mock.calls.filter(([, init]) => ((init as RequestInit | undefined)?.method ?? 'GET') === 'GET');
+const postCalls = () => fetchMock.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST');
+
 const renderDashboard = () =>
   render(
     <ToastProvider>
-      <EscrowDashboard />
+      <SwrProvider value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <EscrowDashboard />
+      </SwrProvider>
     </ToastProvider>,
   );
 
-/** Mock the initial list load and return the contract it shows. */
+/** Mock the initial list load and wait for the card to render. */
 const primeList = async (c: EscrowContract) => {
   fetchMock.mockResolvedValueOnce(ok({ data: [c] }));
   renderDashboard();
@@ -52,19 +68,19 @@ describe('EscrowDashboard toasts', () => {
     fetchMock.mockReset();
   });
 
-  it('shows a success toast after a mocked successful release', async () => {
-    const funded = contract({ fundedAmount: 1000 });
-    const released = contract({ fundedAmount: 1000, releasedAmount: 300, milestones: [{ index: 0, title: 'Design', amount: 300, released: true }, { index: 1, title: 'Build', amount: 700, released: false }] });
-    await primeList(funded);
-
+  it('shows a success toast after a mocked successful release, with no list refetch', async () => {
+    await primeList(contract({ fundedAmount: 1000 }));
     fetchMock.mockResolvedValueOnce(ok({ data: released }));
-    fetchMock.mockResolvedValueOnce(ok({ data: [released] }));
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Release next' }));
 
     expect(await screen.findByText('Escrow #7: milestone released')).toBeInTheDocument();
+    // The POST response is written straight into the cache.
+    expect(await screen.findByText(/\[x\] Design/)).toBeInTheDocument();
     expect(fetchMock.mock.calls[1][0]).toContain('/api/v1/contracts/7/milestones/0/release');
+    expect(postCalls()).toHaveLength(1);
+    expect(getCalls()).toHaveLength(1);
   });
 
   it('shows an error toast with the API message after a 409', async () => {
@@ -77,6 +93,7 @@ describe('EscrowDashboard toasts', () => {
     const alert = screen.getByRole('alert');
     expect(await within(alert).findByText('Milestone already released')).toBeInTheDocument();
     expect(screen.queryByText('Escrow #7: milestone released')).not.toBeInTheDocument();
+    expect(getCalls()).toHaveLength(1);
   });
 
   it('keeps a previous error toast visible when the next action succeeds', async () => {
@@ -87,9 +104,7 @@ describe('EscrowDashboard toasts', () => {
     await user.click(screen.getByRole('button', { name: 'Release next' }));
     await within(screen.getByRole('alert')).findByText('Milestone already released');
 
-    const funded = contract({ fundedAmount: 1000 });
-    fetchMock.mockResolvedValueOnce(ok({ data: funded }));
-    fetchMock.mockResolvedValueOnce(ok({ data: [funded] }));
+    fetchMock.mockResolvedValueOnce(ok({ data: contract({ fundedAmount: 1000, status: 'Funded' }) }));
     await user.click(screen.getByRole('button', { name: 'Dispute' }));
 
     // A second action must not erase the failed first one.
@@ -122,27 +137,24 @@ describe('EscrowDashboard toasts', () => {
     expect(await within(alert).findByText('Invalid milestones')).toBeInTheDocument();
   });
 
-  it('shows a success toast and a View escrow action after creating an escrow', async () => {
+  it('shows a success toast, a View escrow action and the new card after creating', async () => {
     fetchMock.mockResolvedValueOnce(ok({ data: [] }));
     renderDashboard();
     await screen.findByText('No escrows yet. Create the first one.');
 
-    const created = contract();
-    fetchMock.mockResolvedValueOnce(ok({ data: created }));
-    fetchMock.mockResolvedValueOnce(ok({ data: [created] }));
+    fetchMock.mockResolvedValueOnce(ok({ data: contract() }));
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Create escrow' }));
 
     expect(await screen.findByText('Escrow #7 created')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'View escrow' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: '#7 Website redesign' })).toBeInTheDocument();
   });
 
   it('shows a success toast after funding', async () => {
-    const funded = contract({ fundedAmount: 1000 });
     await primeList(contract());
-    fetchMock.mockResolvedValueOnce(ok({ data: funded }));
-    fetchMock.mockResolvedValueOnce(ok({ data: [funded] }));
+    fetchMock.mockResolvedValueOnce(ok({ data: contract({ fundedAmount: 1000, status: 'Funded' }) }));
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Fund 1000 USDC' }));
@@ -152,9 +164,7 @@ describe('EscrowDashboard toasts', () => {
 
   it('shows a success toast after disputing', async () => {
     await primeList(contract());
-    const disputed = contract({ status: 'Disputed' });
-    fetchMock.mockResolvedValueOnce(ok({ data: disputed }));
-    fetchMock.mockResolvedValueOnce(ok({ data: [disputed] }));
+    fetchMock.mockResolvedValueOnce(ok({ data: contract({ status: 'Disputed' }) }));
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Dispute' }));
@@ -164,9 +174,7 @@ describe('EscrowDashboard toasts', () => {
 
   it('shows a success toast after cancelling', async () => {
     await primeList(contract());
-    const cancelled = contract({ status: 'Cancelled' });
-    fetchMock.mockResolvedValueOnce(ok({ data: cancelled }));
-    fetchMock.mockResolvedValueOnce(ok({ data: [cancelled] }));
+    fetchMock.mockResolvedValueOnce(ok({ data: contract({ status: 'Cancelled' }) }));
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -177,7 +185,6 @@ describe('EscrowDashboard toasts', () => {
   it('shows a success toast after resolving a dispute', async () => {
     await primeList(contract({ status: 'Disputed' }));
     fetchMock.mockResolvedValueOnce(ok({ data: contract({ status: 'Resolved', releasedAmount: 500 }) }));
-    fetchMock.mockResolvedValueOnce(ok({ data: [contract({ status: 'Resolved', releasedAmount: 500 })] }));
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Resolve 50/50' }));
@@ -185,16 +192,21 @@ describe('EscrowDashboard toasts', () => {
     expect(await screen.findByText('Escrow #7 resolved')).toBeInTheDocument();
   });
 
-  it('shows a success toast after rating and sends the chosen rating', async () => {
+  it('shows a success toast after rating, sends the rating and refreshes the list', async () => {
     await primeList(contract({ status: 'Completed' }));
-    fetchMock.mockResolvedValueOnce(ok({ data: { address: 'GFREELANCERYYYY', completedContracts: 1, totalRating: 4, averageRating: 4 } }));
+    fetchMock.mockResolvedValueOnce(
+      ok({ address: 'GFREELANCERYYYY', completedContracts: 1, totalRating: 4, averageRating: 4 }),
+    );
     fetchMock.mockResolvedValueOnce(ok({ data: [contract({ status: 'Completed', reputationIssued: true })] }));
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: '4' }));
 
     expect(await screen.findByText('Rating submitted for escrow #7')).toBeInTheDocument();
-    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ rating: 4 });
+    expect(JSON.parse(postCalls()[0][1].body)).toEqual({ rating: 4 });
+    // The rate endpoint returns a Reputation, so the list is revalidated once.
+    expect(await screen.findByText('Rated. Thanks!')).toBeInTheDocument();
+    expect(getCalls()).toHaveLength(2);
   });
 
   it('keeps a failed list load inline instead of a toast', async () => {

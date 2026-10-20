@@ -3,6 +3,7 @@ import Link from 'next/link';
 import './globals.css';
 import { Header } from '@/components/Header';
 import { ToastProvider } from '@/components/toast/ToastProvider';
+import { SwrProvider } from '@/lib/swr';
 import { site, explorerUrl, apiDocsUrl } from '@/lib/site';
 
 export const metadata: Metadata = {
@@ -23,30 +24,32 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <ToastProvider>
-          <a href="#main" className="skip">
-            Skip to content
-          </a>
-          <Header />
-          <main id="main">{children}</main>
-          <footer className="footer">
-            <div className="container footer-inner">
-              <div>
-                <strong style={{ color: 'var(--text)' }}>TalentTrust</strong> &middot; {site.tagline}
+          <SwrProvider>
+            <a href="#main" className="skip">
+              Skip to content
+            </a>
+            <Header />
+            <main id="main">{children}</main>
+            <footer className="footer">
+              <div className="container footer-inner">
+                <div>
+                  <strong style={{ color: 'var(--text)' }}>TalentTrust</strong> &middot; {site.tagline}
+                </div>
+                <div className="footer-links">
+                  <Link href="/docs">Docs</Link>
+                  <a href={apiDocsUrl} target="_blank" rel="noreferrer">
+                    API
+                  </a>
+                  <a href={explorerUrl} target="_blank" rel="noreferrer">
+                    Contract
+                  </a>
+                  <a href={site.github} target="_blank" rel="noreferrer">
+                    GitHub
+                  </a>
+                </div>
               </div>
-              <div className="footer-links">
-                <Link href="/docs">Docs</Link>
-                <a href={apiDocsUrl} target="_blank" rel="noreferrer">
-                  API
-                </a>
-                <a href={explorerUrl} target="_blank" rel="noreferrer">
-                  Contract
-                </a>
-                <a href={site.github} target="_blank" rel="noreferrer">
-                  GitHub
-                </a>
-              </div>
-            </div>
-          </footer>
+            </footer>
+          </SwrProvider>
         </ToastProvider>
       </body>
     </html>
