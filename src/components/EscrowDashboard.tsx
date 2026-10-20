@@ -2,11 +2,13 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { api, ApiError, EscrowContract } from '@/lib/api';
+import Link from 'next/link';
+import { api, ApiError, EscrowContract, Reputation, unwrapReputation } from '@/lib/api';
 import { applyQuery, ContractQuery, DEFAULT_QUERY, parseQuery, toSearchParams } from '@/lib/contractQuery';
 import { EscrowToolbar } from './escrow/EscrowToolbar';
 import { Pagination } from './escrow/Pagination';
 import { useToast } from '@/components/toast/ToastProvider';
+import { StarRating } from '@/components/reputation/StarRating';
 
 const short = (a: string) => (a.length > 14 ? `${a.slice(0, 6)}...${a.slice(-4)}` : a);
 
@@ -21,6 +23,8 @@ export function EscrowDashboard() {
   const [error, setError] = useState<{ message: string; detail?: string } | null>(null);
   const [busy, setBusy] = useState<number | 'new' | null>(null);
   const loadController = useRef<AbortController | null>(null);
+  const [rated, setRated] = useState<Record<number, Reputation>>({});
+  const [ratingErrors, setRatingErrors] = useState<Record<number, string>>({});
   const toast = useToast();
   const [form, setForm] = useState({
     title: 'Website redesign',
@@ -96,6 +100,30 @@ export function EscrowDashboard() {
     }
   };
 
+  const rate = async (c: EscrowContract, rating: number) => {
+    setBusy(c.id);
+    setRatingErrors((prev) => {
+      const next = { ...prev };
+      delete next[c.id];
+      return next;
+    });
+    try {
+      const reputation = await api<Reputation>(`/api/v1/contracts/${c.id}/reputation`, {
+        method: 'POST',
+        body: { rating },
+      }).then(unwrapReputation);
+      if (reputation) {
+        setRated((prev) => ({ ...prev, [c.id]: reputation }));
+      }
+      toast.success(`Rating submitted for escrow #${c.id}`);
+    } catch (e) {
+      // already_rated / invalid_status: show inline.
+      setRatingErrors((prev) => ({ ...prev, [c.id]: (e as Error).message }));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const viewEscrow = (id: number) => {
     const el = document.getElementById(`escrow-${id}`);
     el?.scrollIntoView({ block: 'center' });
@@ -120,7 +148,7 @@ export function EscrowDashboard() {
           body: { title: form.title, client: form.client, freelancer: form.freelancer, milestones },
         }),
       (result) => {
-        const created = result as EscrowContract | null;
+        const created = result.contract;
         if (created?.id) {
           toast.success(`Escrow #${created.id} created`, {
             action: { label: 'View escrow', onClick: () => viewEscrow(created.id) },
@@ -304,28 +332,21 @@ export function EscrowDashboard() {
                     Resolve 50/50
                   </button>
                 )}
-                {c.status === 'Completed' && !c.reputationIssued && (
-                  <>
-                    <span className="small muted">Rate freelancer:</span>
-                    {[1, 2, 3, 4, 5].map((r) => (
-                      <button
-                        key={r}
-                        className="btn btn-secondary btn-sm"
-                        disabled={busy === c.id}
-                        onClick={() =>
-                          act(
-                            c.id,
-                            () => run(c.id, 'reputation', { body: { rating: r } }),
-                            () => toast.success(`Rating submitted for escrow #${c.id}`),
-                          )
-                        }
-                      >
-                        {r}
-                      </button>
-                    ))}
-                  </>
+                {c.status === 'Completed' && !c.reputationIssued && !rated[c.id] && (
+                  <StarRating onSubmit={(rating) => rate(c, rating)} disabled={busy === c.id} />
                 )}
-                {c.status === 'Completed' && c.reputationIssued && <span className="small muted">Rated. Thanks!</span>}
+                {c.status === 'Completed' && rated[c.id] && (
+                  <p className="small" style={{ margin: 0, flex: '1 1 100%' }}>
+                    New average: {rated[c.id].averageRating} / 5 across {rated[c.id].completedContracts}{' '}
+                    <Link href={`/reputation?address=${c.freelancer}`}>View reputation</Link>
+                  </p>
+                )}
+                {c.status === 'Completed' && c.reputationIssued && !rated[c.id] && <span className="small muted">Rated. Thanks!</span>}
+                {c.status === 'Completed' && ratingErrors[c.id] && (
+                  <div className="alert alert-error small" role="alert" style={{ flex: '1 1 100%', margin: 0 }}>
+                    {ratingErrors[c.id]}
+                  </div>
+                )}
               </div>
             </article>
           );

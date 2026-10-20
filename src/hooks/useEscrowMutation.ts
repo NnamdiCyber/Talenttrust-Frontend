@@ -14,6 +14,13 @@ export interface EscrowRunOptions {
   milestoneIndex?: number;
 }
 
+export interface EscrowActionResult {
+  /** Raw API response, e.g. the Reputation returned by the rate endpoint. */
+  response: unknown;
+  /** The updated contract, when the endpoint returned one. */
+  contract: EscrowContract | null;
+}
+
 function actionPath(id: number | 'new', action: EscrowAction, milestoneIndex?: number): string {
   switch (action) {
     case 'create':
@@ -59,7 +66,7 @@ export function useEscrowMutation() {
   );
 
   const run = useCallback(
-    async (id: number | 'new', action: EscrowAction, options?: EscrowRunOptions): Promise<EscrowContract | null> => {
+    async (id: number | 'new', action: EscrowAction, options?: EscrowRunOptions): Promise<EscrowActionResult> => {
       const response = await api(actionPath(id, action, options?.milestoneIndex), {
         method: 'POST',
         body: options?.body,
@@ -73,7 +80,7 @@ export function useEscrowMutation() {
         // a Reputation): refresh the lists so the card reflects server state.
         await mutate((key) => isContractsListKey(key), undefined, { revalidate: true });
       }
-      return contract;
+      return { response, contract };
     },
     [mutate, patchLists],
   );

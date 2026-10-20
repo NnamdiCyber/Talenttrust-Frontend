@@ -192,21 +192,63 @@ describe('EscrowDashboard toasts', () => {
     expect(await screen.findByText('Escrow #7 resolved')).toBeInTheDocument();
   });
 
-  it('shows a success toast after rating, sends the rating and refreshes the list', async () => {
+  it('rates with the star widget, sends the chosen rating and shows the new average', async () => {
     await primeList(contract({ status: 'Completed' }));
     fetchMock.mockResolvedValueOnce(
-      ok({ address: 'GFREELANCERYYYY', completedContracts: 1, totalRating: 4, averageRating: 4 }),
+      ok({ data: { address: 'GFREELANCERYYYY', completedContracts: 3, totalRating: 13, averageRating: 4.5 } }),
     );
     fetchMock.mockResolvedValueOnce(ok({ data: [contract({ status: 'Completed', reputationIssued: true })] }));
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: '4' }));
+    await user.click(screen.getByRole('radio', { name: '4 stars – Very good' }));
+    expect(screen.getByRole('button', { name: 'Submit rating' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Submit rating' }));
 
     expect(await screen.findByText('Rating submitted for escrow #7')).toBeInTheDocument();
     expect(JSON.parse(postCalls()[0][1].body)).toEqual({ rating: 4 });
-    // The rate endpoint returns a Reputation, so the list is revalidated once.
-    expect(await screen.findByText('Rated. Thanks!')).toBeInTheDocument();
+    const summary = await screen.findByText((content, el) => el?.tagName === 'P' && content.startsWith('New average:'));
+    expect(summary).toBeInTheDocument();
+    expect(summary.textContent).toContain('4.5');
+    expect(summary.textContent).toContain('across 3');
+    expect(screen.getByRole('link', { name: 'View reputation' }).getAttribute('href')).toContain(
+      '/reputation?address=GFREELANCERYYYY',
+    );
+    // Rate returns a Reputation, so the list revalidates once.
     expect(getCalls()).toHaveLength(2);
+  });
+
+  it('keeps submit disabled until a star is chosen', async () => {
+    await primeList(contract({ status: 'Completed' }));
+
+    expect(screen.getByRole('button', { name: 'Submit rating' })).toBeDisabled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a 409 rating error inline and refreshes the list without a toast', async () => {
+    await primeList(contract({ status: 'Completed' }));
+    fetchMock.mockResolvedValueOnce(fail(409, 'already_rated'));
+    fetchMock.mockResolvedValueOnce(ok({ data: [contract({ status: 'Completed', reputationIssued: true })] }));
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('radio', { name: '5 stars – Excellent' }));
+    await user.click(screen.getByRole('button', { name: 'Submit rating' }));
+
+    expect(await screen.findByText('already_rated')).toBeInTheDocument();
+    expect(await screen.findByText('Rated. Thanks!')).toBeInTheDocument();
+    expect(screen.queryByText(/Rating submitted/)).not.toBeInTheDocument();
+  });
+
+  it('shows a network error on rating inline', async () => {
+    await primeList(contract({ status: 'Completed' }));
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    fetchMock.mockResolvedValueOnce(ok({ data: [contract({ status: 'Completed' })] }));
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('radio', { name: '1 star – Poor' }));
+    await user.click(screen.getByRole('button', { name: 'Submit rating' }));
+
+    expect(await screen.findByText('Failed to fetch')).toBeInTheDocument();
+    expect(screen.queryByText(/Rating submitted/)).not.toBeInTheDocument();
   });
 
   it('keeps a failed list load inline instead of a toast', async () => {
