@@ -94,7 +94,7 @@ export function EscrowDashboard() {
       onSuccess?.(result);
     } catch (e) {
       if (e instanceof ApiError && e.kind === 'aborted') return;
-      toast.error(e instanceof ApiError ? e.userMessage : (e as Error).message);
+      toast.error((e as Error).message);
     } finally {
       setBusy(null);
     }
@@ -189,7 +189,7 @@ export function EscrowDashboard() {
       <div className="stack" style={{ minWidth: 0 }}>
         {error && (
           <div className="alert alert-error" role="alert">
-            {error.message}
+            {`Could not reach the API: ${error.message}`}
           </div>
         )}
         <h2 id="escrow-list" className="list-heading" ref={headingRef} tabIndex={-1}>

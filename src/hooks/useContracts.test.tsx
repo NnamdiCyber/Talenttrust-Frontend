@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EscrowContract } from '@/lib/api';
@@ -120,8 +120,7 @@ describe('SWR data layer', () => {
       </SwrProvider>,
     );
 
-    await screen.findByText(/error: Failed to fetch/);
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await waitFor(() => screen.getByText(/error: Failed to fetch/), { timeout: 5000 });
     expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
   });
 

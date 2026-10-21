@@ -37,7 +37,7 @@ export async function fetcher(key: ContractsListKey | string): Promise<unknown> 
 
 /** 4xx responses are terminal: retrying the same request cannot succeed. */
 export function shouldRetryOnError(error: Error): boolean {
-  return !(error instanceof ApiError && error.status >= 400 && error.status < 500);
+  return !(error instanceof ApiError && (error.status ?? 0) >= 400 && (error.status ?? 0) < 500);
 }
 
 const defaultConfig: SWRConfiguration = {
