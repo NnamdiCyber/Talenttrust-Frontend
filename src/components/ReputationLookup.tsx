@@ -2,7 +2,7 @@
 
 import { FormEvent, useCallback, useState } from 'react';
 import { StrKey } from '@stellar/stellar-sdk';
-import { ApiError, Reputation } from '@/lib/api';
+import { Reputation } from '@/lib/api';
 import { useReputation } from '@/hooks/useContracts';
 import { OnChainReputation, readOnChainReputation } from '@/lib/stellar/reputation';
 import { site } from '@/lib/site';
@@ -74,6 +74,13 @@ export function ReputationLookup() {
       <dd aria-labelledby={id}>{value}</dd>
     </div>
   );
+
+  const displayError = error
+    ? {
+        message: error.message,
+        detail: error.userMessage,
+      }
+    : null;
 
   return (
     <div className="stack" style={{ maxWidth: 720, paddingBottom: 64 }}>
@@ -162,7 +169,9 @@ export function ReputationLookup() {
                 <p className="small muted">In-memory demo data; may reset.</p>
                 {apiError ? (
                   <>
-                    <div className="alert alert-error">{apiError.message}</div>
+                    <div className="alert alert-error" role="alert" title={displayError.detail}>
+                      {displayError.message}
+                    </div>
                     <button
                       className="btn btn-secondary btn-sm"
                       type="button"

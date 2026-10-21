@@ -24,20 +24,21 @@ export function isContractsListKey(key: unknown): key is ContractsListKey {
 
 export async function fetcher(key: ContractsListKey | string): Promise<unknown> {
   const [path, params] = typeof key === 'string' ? [key, null] as const : key;
+  // Disable api()-level retries: SWR owns the retry strategy via shouldRetryOnError.
   if (params) {
     const search = new URLSearchParams();
     for (const [name, value] of Object.entries(params)) {
       if (value !== undefined && value !== '') search.set(name, String(value));
     }
     const query = search.toString();
-    return api(query ? `${path}?${query}` : path);
+    return api(query ? `${path}?${query}` : path, { retries: 0 });
   }
-  return api(path);
+  return api(path, { retries: 0 });
 }
 
 /** 4xx responses are terminal: retrying the same request cannot succeed. */
 export function shouldRetryOnError(error: Error): boolean {
-  return !(error instanceof ApiError && error.status >= 400 && error.status < 500);
+  return !(error instanceof ApiError && typeof error.status === 'number' && error.status >= 400 && error.status < 500);
 }
 
 const defaultConfig: SWRConfiguration = {

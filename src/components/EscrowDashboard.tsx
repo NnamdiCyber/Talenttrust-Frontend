@@ -44,13 +44,13 @@ export function EscrowDashboard() {
     loadController.current = controller;
     try {
       const qs = query.status ? `?status=${encodeURIComponent(query.status)}` : '';
-      const res = await api<{ data: EscrowContract[] }>(`/api/v1/contracts${qs}`, { signal: controller.signal });
+      const res = await api<{ data: EscrowContract[] }>(`/api/v1/contracts${qs}`, { signal: controller.signal, retries: 0 });
       setContracts(Array.isArray(res.data) ? res.data : []);
       setError(null);
     } catch (e) {
       if (e instanceof ApiError && e.kind === 'aborted') return;
       const detail = e instanceof ApiError ? e.message : (e as Error).message;
-      setError({ message: e instanceof ApiError ? e.userMessage : `Could not reach the API: ${detail}`, detail });
+      setError({ message: `Could not reach the API: ${detail}`, detail });
       setContracts([]);
     }
   }, [query.status]);
@@ -95,11 +95,27 @@ export function EscrowDashboard() {
     setBusy(id);
     try {
       const result = await fn();
-      await load();
+      // Write the returned contract into local state; only fall back to a
+      // full reload when the response does not contain a contract.
+      const updated = asContract(result);
+      if (updated) {
+        setContracts((prev) => {
+          if (!prev) return [updated];
+          const exists = prev.some((c) => c.id === updated.id);
+          const next = exists
+            ? prev.map((c) => (c.id === updated.id ? updated : c))
+            : [updated, ...prev];
+          return next.sort((a, b) => b.id - a.id);
+        });
+      } else {
+        // Endpoints that don't return a contract (e.g. rate) require a refresh.
+        await load();
+      }
       onSuccess?.(result);
     } catch (e) {
       if (e instanceof ApiError && e.kind === 'aborted') return;
-      toast.error(e instanceof ApiError ? e.userMessage : (e as Error).message);
+      // Show the raw error message so the caller can see the API detail.
+      toast.error((e as Error).message);
     } finally {
       setBusy(null);
     }
