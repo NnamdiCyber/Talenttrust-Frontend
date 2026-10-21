@@ -44,13 +44,13 @@ export function EscrowDashboard() {
     loadController.current = controller;
     try {
       const qs = query.status ? `?status=${encodeURIComponent(query.status)}` : '';
-      const res = await api<{ data: EscrowContract[] }>(`/api/v1/contracts${qs}`, { signal: controller.signal });
+      const res = await api<{ data: EscrowContract[] }>(`/api/v1/contracts${qs}`, { signal: controller.signal, retries: 0 });
       setContracts(Array.isArray(res.data) ? res.data : []);
       setError(null);
     } catch (e) {
       if (e instanceof ApiError && e.kind === 'aborted') return;
       const detail = e instanceof ApiError ? e.message : (e as Error).message;
-      setError({ message: e instanceof ApiError ? e.userMessage : `Could not reach the API: ${detail}`, detail });
+      setError({ message: `Could not reach the API: ${detail}`, detail });
       setContracts([]);
     }
   }, [query.status]);
@@ -99,7 +99,7 @@ export function EscrowDashboard() {
       onSuccess?.(result);
     } catch (e) {
       if (e instanceof ApiError && e.kind === 'aborted') return;
-      toast.error(e instanceof ApiError ? e.userMessage : (e as Error).message);
+      toast.error(e instanceof ApiError ? e.message : (e as Error).message);
     } finally {
       setBusy(null);
     }
