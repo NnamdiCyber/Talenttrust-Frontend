@@ -75,10 +75,10 @@ export function ReputationLookup() {
     </div>
   );
 
-  const displayError = error
+  const displayError = apiError
     ? {
-        message: error.message,
-        detail: error.userMessage,
+        message: apiError.message,
+        detail: apiError.userMessage,
       }
     : null;
 
@@ -169,8 +169,8 @@ export function ReputationLookup() {
                 <p className="small muted">In-memory demo data; may reset.</p>
                 {apiError ? (
                   <>
-                    <div className="alert alert-error" role="alert" title={displayError.detail}>
-                      {displayError.message}
+                    <div className="alert alert-error" role="alert" title={displayError!.detail}>
+                      {displayError!.message}
                     </div>
                     <button
                       className="btn btn-secondary btn-sm"
