@@ -1,9 +1,34 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useSyncExternalStore } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EscrowContract } from '@/lib/api';
 import { ToastProvider } from '@/components/toast/ToastProvider';
 import { EscrowDashboard } from './EscrowDashboard';
+
+// Minimal stand-in for the App Router: replace() updates useSearchParams()
+const nav = vi.hoisted(() => {
+  let params = new URLSearchParams();
+  const listeners = new Set<() => void>();
+  return {
+    get: () => params,
+    set(search: string) {
+      params = new URLSearchParams(search);
+      listeners.forEach((l) => l());
+    },
+    subscribe(l: () => void) {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+    replace: vi.fn(),
+  };
+});
+
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/contracts',
+  useRouter: () => ({ replace: nav.replace }),
+  useSearchParams: () => useSyncExternalStore(nav.subscribe, nav.get),
+}));
 
 const fetchMock = vi.fn();
 
