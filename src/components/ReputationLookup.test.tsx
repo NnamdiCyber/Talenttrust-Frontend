@@ -131,7 +131,7 @@ describe('ReputationLookup', () => {
 
     respondWith(apiPayload);
     await user.click(screen.getByRole('button', { name: /retry api/i }));
-    await waitFor(() => screen.queryByText(/network down/i)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/network down/i)).not.toBeInTheDocument());
   });
 
   it('shows an API error and retry control for non-2xx', async () => {
@@ -147,7 +147,7 @@ describe('ReputationLookup', () => {
 
     respondWith(apiPayload);
     await user.click(screen.getByRole('button', { name: /retry api/i }));
-    await waitFor(() => screen.queryByText(/Request failed \(404\)/i)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/Request failed \(404\)/i)).not.toBeInTheDocument());
   });
 
   it('renders without crashing when the API returns empty data', async () => {
