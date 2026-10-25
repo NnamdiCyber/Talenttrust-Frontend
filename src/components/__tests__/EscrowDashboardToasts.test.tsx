@@ -41,6 +41,7 @@ const renderWith = async (list: EscrowContract[], post: () => Promise<Response> 
 };
 
 const toastAlerts = () => document.querySelector('.toast-stack[role="alert"]') as HTMLElement;
+const toastStatus = () => document.querySelector('.toast-stack[role="status"]') as HTMLElement;
 
 beforeEach(() => {
   fetchMock.mockReset();
@@ -95,7 +96,8 @@ describe('EscrowDashboard toasts', () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: /fund 1000 usdc for escrow #7/i }));
 
-    expect(await screen.findByText('Escrow #7 funded')).toBeInTheDocument();
+    // The dashboard's own live region announces the same text, so look inside the toast stack.
+    expect(await within(toastStatus()).findByText('Escrow #7 funded')).toBeInTheDocument();
   });
 
   it('shows a success toast after cancelling', async () => {
