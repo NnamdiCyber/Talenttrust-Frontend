@@ -1,11 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { useToast } from '@/components/toast/ToastProvider';
+import { useOptionalToast } from '@/components/toast/ToastProvider';
 
 export function CopyButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
-  const toast = useToast();
+  const toast = useOptionalToast();
   return (
     <button
       type="button"
