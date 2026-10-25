@@ -19,6 +19,17 @@ export interface EscrowContract {
   releasedAmount: number;
   status: 'Created' | 'Funded' | 'Completed' | 'Disputed' | 'Resolved' | 'Cancelled';
   reputationIssued: boolean;
+  dispute?: Dispute | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface Dispute {
+  raisedBy: string;
+  reason: string;
+  openedAt?: string;
+  freelancerBps?: number | null;
+  resolvedAt?: string | null;
 }
 
 export interface Reputation {
@@ -28,6 +39,16 @@ export interface Reputation {
   averageRating: number;
 }
 
+export interface Stats {
+  contracts: number;
+  byStatus: Record<EscrowContract["status"], number>;
+  totalEscrowed: number;
+  totalReleased: number;
+}
+
+export function getStats(): Promise<Stats> {
+  return api<Stats>("/stats");
+}
 export type ApiErrorKind = 'network' | 'timeout' | 'http' | 'aborted';
 
 const FRIENDLY_CODES: Record<string, string> = {
@@ -143,8 +164,6 @@ export async function api<T>(path: string, init: ApiOptions = {}): Promise<T> {
   const url = `${site.apiUrl}${path}`;
 
   let attempt = 0;
-  let kind: ApiErrorKind = 'network';
-  let lastError: Error | undefined;
   for (;;) {
     if (init.signal?.aborted) throw new ApiError({ kind: 'aborted' });
 
@@ -158,7 +177,7 @@ export async function api<T>(path: string, init: ApiOptions = {}): Promise<T> {
     if (init.signal) signals.push(init.signal);
     const signal = combineSignals(signals);
 
-    let res: Response | undefined;
+    let res: Response;
     try {
       res = await fetch(url, {
         method,
@@ -170,19 +189,15 @@ export async function api<T>(path: string, init: ApiOptions = {}): Promise<T> {
     } catch (e) {
       clearTimeout(timer);
       if (init.signal?.aborted) throw new ApiError({ kind: 'aborted' });
-      lastError = e as Error;
-      kind = timedOut ? 'timeout' : 'network';
+      const kind: ApiErrorKind = timedOut ? 'timeout' : 'network';
       if (attempt < maxRetries) {
         attempt += 1;
         await sleep(backoffDelay(attempt - 1), init.signal ?? new AbortController().signal);
         continue;
       }
-      throw new ApiError({ kind, message: lastError?.message });
+      throw new ApiError({ kind, message: (e as Error)?.message });
     }
     clearTimeout(timer);
-    if (!res) {
-      throw new ApiError({ kind, message: lastError?.message });
-    }
 
     const data = await res.json().catch(() => ({}));
 
@@ -205,20 +220,20 @@ export async function api<T>(path: string, init: ApiOptions = {}): Promise<T> {
   }
 }
 
-/** Unwrap the EscrowContract that mutation endpoints return, if present. */
-export function unwrapContract(payload: unknown): EscrowContract | null {
-  if (!payload || typeof payload !== 'object') return null;
-  const obj = payload as { data?: EscrowContract; id?: number };
-  if (obj.data && typeof obj.data.id === 'number') return obj.data;
-  if (typeof obj.id === 'number' && 'status' in obj) return payload as EscrowContract;
-  return null;
-}
-
 /** Unwrap the Reputation that the rate endpoint returns, if present. */
 export function unwrapReputation(payload: unknown): Reputation | null {
   if (!payload || typeof payload !== 'object') return null;
   const obj = payload as { data?: Reputation; address?: string };
   if (obj.data && typeof obj.data.address === 'string') return obj.data;
   if (typeof obj.address === 'string') return payload as Reputation;
+  return null;
+}
+
+/** Unwrap the EscrowContract that mutation endpoints return, if present. */
+export function unwrapContract(payload: unknown): EscrowContract | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const obj = payload as { data?: EscrowContract; id?: number };
+  if (obj.data && typeof obj.data.id === 'number') return obj.data;
+  if (typeof obj.id === 'number' && 'status' in obj) return payload as EscrowContract;
   return null;
 }

@@ -59,6 +59,13 @@ export function useToast(): ToastApi {
   return ctx;
 }
 
+const NOOP_TOAST: ToastApi = { success: () => {}, error: () => {}, info: () => {}, dismiss: () => {} };
+
+/** Like useToast, but a no-op when rendered outside a ToastProvider (e.g. isolated component tests). */
+export function useOptionalToast(): ToastApi {
+  return useContext(ToastContext) ?? NOOP_TOAST;
+}
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastEntry[]>([]);
   const [paused, setPaused] = useState(false);

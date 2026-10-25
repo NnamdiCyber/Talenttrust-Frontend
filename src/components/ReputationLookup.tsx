@@ -1,70 +1,102 @@
 'use client';
 
-import { FormEvent, useCallback, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { StrKey } from '@stellar/stellar-sdk';
-import { Reputation } from '@/lib/api';
-import { useReputation } from '@/hooks/useContracts';
+import { api, Reputation } from '@/lib/api';
 import { OnChainReputation, readOnChainReputation } from '@/lib/stellar/reputation';
 import { site } from '@/lib/site';
 
 const DEMO_ADDRESS = 'GFREELANCERDEMOBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
 
 export function ReputationLookup() {
+  const searchParams = useSearchParams();
   const [address, setAddress] = useState(DEMO_ADDRESS);
   const [addressError, setAddressError] = useState<string | null>(null);
-  const [queried, setQueried] = useState<string | null>(null);
-  const { reputation, error: apiError, mutate: revalidateApi, isLoading: apiIsLoading } = useReputation(queried);
 
+  const [busy, setBusy] = useState(false);
+  const [apiResult, setApiResult] = useState<Reputation | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
   const [chainResult, setChainResult] = useState<OnChainReputation | null>(null);
   const [chainError, setChainError] = useState<string | null>(null);
-  const [chainBusy, setChainBusy] = useState(false);
 
   const clearResults = useCallback(() => {
-    setQueried(null);
+    setApiResult(null);
+    setApiError(null);
     setChainResult(null);
     setChainError(null);
   }, []);
 
   const mismatch =
-    reputation &&
+    apiResult &&
     chainResult &&
-    (reputation.averageRating !== chainResult.averageRating ||
-      reputation.completedContracts !== chainResult.completedContracts ||
-      reputation.totalRating !== chainResult.totalRating);
+    (apiResult.averageRating !== chainResult.averageRating ||
+      apiResult.completedContracts !== chainResult.completedContracts ||
+      apiResult.totalRating !== chainResult.totalRating);
 
-  const lookup = (e: FormEvent) => {
-    e.preventDefault();
-    const value = address.trim();
+  const performLookup = useCallback(async (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    setAddress(trimmed);
     setAddressError(null);
     clearResults();
 
-    if (!StrKey.isValidEd25519PublicKey(value)) {
+    if (!StrKey.isValidEd25519PublicKey(trimmed)) {
       setAddressError('Enter a valid Stellar public address (it must start with G and pass the StrKey checksum).');
       return;
     }
 
-    setQueried(value);
-    setChainBusy(true);
-    readOnChainReputation(value)
-      .then(setChainResult)
-      .catch((err) => setChainError((err as Error).message))
-      .finally(() => setChainBusy(false));
+    setBusy(true);
+    try {
+      const [apiSettled, chainSettled] = await Promise.allSettled([
+        api<Reputation>(`/api/v1/reputation/${encodeURIComponent(trimmed)}`),
+        readOnChainReputation(trimmed),
+      ]);
+      if (apiSettled.status === 'fulfilled') {
+        setApiResult(apiSettled.value);
+      } else {
+        setApiError((apiSettled.reason as Error).message);
+      }
+      if (chainSettled.status === 'fulfilled') {
+        setChainResult(chainSettled.value);
+      } else {
+        setChainError((chainSettled.reason as Error).message);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [clearResults]);
+
+  useEffect(() => {
+    const queryAddress = searchParams?.get('address');
+    if (queryAddress && queryAddress.trim()) {
+      const clean = queryAddress.trim();
+      performLookup(clean);
+    }
+  }, [searchParams, performLookup]);
+
+  const lookup = async (e: FormEvent) => {
+    e.preventDefault();
+    performLookup(address);
   };
 
-  const retryApi = () => {
-    revalidateApi();
+  const retryApi = async () => {
+    const value = address.trim();
+    setApiError(null);
+    try {
+      setApiResult(await api<Reputation>(`/api/v1/reputation/${encodeURIComponent(value)}`));
+    } catch (err) {
+      setApiError((err as Error).message);
+    }
   };
 
   const retryChain = async () => {
     const value = address.trim();
     setChainError(null);
-    setChainBusy(true);
     try {
       setChainResult(await readOnChainReputation(value));
     } catch (err) {
       setChainError((err as Error).message);
-    } finally {
-      setChainBusy(false);
     }
   };
 
@@ -74,13 +106,6 @@ export function ReputationLookup() {
       <dd aria-labelledby={id}>{value}</dd>
     </div>
   );
-
-  const displayError = apiError
-    ? {
-        message: apiError.message,
-        detail: apiError.userMessage,
-      }
-    : null;
 
   return (
     <div className="stack" style={{ maxWidth: 720, paddingBottom: 64 }}>
@@ -97,8 +122,8 @@ export function ReputationLookup() {
               aria-describedby={addressError ? 'address-error' : undefined}
               required
             />
-            <button className="btn btn-primary" type="submit" disabled={apiIsLoading || chainBusy}>
-              {apiIsLoading || chainBusy ? 'Looking up...' : 'Look up'}
+            <button className="btn btn-primary" type="submit" disabled={busy}>
+              {busy ? 'Looking up...' : 'Look up'}
             </button>
           </div>
           {addressError && (
@@ -109,7 +134,7 @@ export function ReputationLookup() {
         </div>
       </form>
 
-      {(reputation || chainResult || apiError || chainError) && (
+      {(apiResult || chainResult || apiError || chainError) && (
         <div className="results" role="region" aria-label="Reputation results" aria-live="polite">
           {mismatch && (
             <div className="notice notice-info" role="status">
@@ -163,15 +188,13 @@ export function ReputationLookup() {
                 )}
               </div>
             ) : null}
-            {reputation || apiError ? (
+            {apiResult || apiError ? (
               <div className="card">
                 <h3 id="api-heading">TalentTrust API (demo)</h3>
                 <p className="small muted">In-memory demo data; may reset.</p>
                 {apiError ? (
                   <>
-                    <div className="alert alert-error" role="alert" title={displayError!.detail}>
-                      {displayError!.message}
-                    </div>
+                    <div className="alert alert-error">{apiError}</div>
                     <button
                       className="btn btn-secondary btn-sm"
                       type="button"
@@ -181,15 +204,15 @@ export function ReputationLookup() {
                       Retry API
                     </button>
                   </>
-                ) : (
-                  reputation && (
-                    <dl className="stats" aria-labelledby="api-heading">
-                      {statRow('Completed contracts', reputation.completedContracts, 'api-contracts')}
-                      {statRow('Total rating points', reputation.totalRating, 'api-total')}
-                      {statRow('Average rating', `${(reputation.averageRating ?? 0).toFixed(2)} / 5`, 'api-average')}
-                    </dl>
-                  )
-                )}
+              ) : (
+                apiResult && (
+                  <dl className="stats" aria-labelledby="api-heading">
+                    {statRow('Completed contracts', apiResult.completedContracts, 'api-contracts')}
+                    {statRow('Total rating points', apiResult.totalRating, 'api-total')}
+                    {statRow('Average rating', `${(apiResult.averageRating ?? 0).toFixed(2)} / 5`, 'api-average')}
+                  </dl>
+                )
+              )}
               </div>
             ) : null}
           </div>
