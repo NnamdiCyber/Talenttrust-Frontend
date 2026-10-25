@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Keypair } from '@stellar/stellar-sdk';
-import { SwrProvider } from '@/lib/swr';
 import { ReputationLookup } from './ReputationLookup';
 import { readOnChainReputation } from '@/lib/stellar/reputation';
 
@@ -18,13 +17,6 @@ const fetchMock = vi.fn();
 vi.stubGlobal('fetch', fetchMock);
 const validAddress = Keypair.random().publicKey();
 
-const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body } as Response);
-const fail = (status: number, message: string) => ({
-  ok: false,
-  status,
-  json: async () => ({ message }),
-} as Response);
-
 const respondWith = (data: unknown, status = 200) => {
   fetchMock.mockResolvedValue(
     new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } }),
@@ -32,13 +24,6 @@ const respondWith = (data: unknown, status = 200) => {
 };
 
 const apiPayload = { address: validAddress, completedContracts: 5, totalRating: 25, averageRating: 5 };
-
-const renderLookup = () =>
-  render(
-    <SwrProvider value={{ provider: () => new Map(), dedupingInterval: 0 }}>
-      <ReputationLookup />
-    </SwrProvider>,
-  );
 
 const submitLookup = async (user: ReturnType<typeof userEvent.setup>, address = validAddress) => {
   const input = screen.getByLabelText('Freelancer address');
@@ -56,7 +41,7 @@ describe('ReputationLookup', () => {
     fetchMock.mockReset();
     mockReadOnChain.mockReset();
     vi.stubGlobal('fetch', fetchMock);
-    renderLookup();
+    render(<ReputationLookup />);
   });
 
   afterEach(() => {
@@ -71,7 +56,10 @@ describe('ReputationLookup', () => {
     const user = userEvent.setup();
     await submitLookup(user);
 
-    await waitFor(() => expect(screen.getByRole('region', { name: 'Reputation results' })).toHaveAttribute('aria-live', 'polite'));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: 'Reputation results' })).toHaveAttribute('aria-live', 'polite'),
+    );
 
     expect(screen.getByRole('heading', { name: 'On-chain (verified)' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'TalentTrust API (demo)' })).toBeInTheDocument();
@@ -112,15 +100,16 @@ describe('ReputationLookup', () => {
     expect(screen.getByText('5.00 / 5')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /retry on-chain/i })).toBeInTheDocument();
 
-    mockReadOnChain.mockResolvedValueOnce({ ...apiPayload, address: validAddress });
+    mockReadOnChain.mockResolvedValue({ ...apiPayload, address: validAddress });
     await user.click(screen.getByRole('button', { name: /retry on-chain/i }));
     await waitFor(() => expect(mockReadOnChain).toHaveBeenCalledTimes(2));
     expect(screen.queryByText(/could not read contract/i)).not.toBeInTheDocument();
   });
 
   it('shows an API error and retry control for network error', async () => {
-    fetchMock.mockRejectedValue(new Error('network down'));
+    fetchMock.mockReset();
     mockReadOnChain.mockResolvedValue({ ...apiPayload, address: validAddress });
+    fetchMock.mockRejectedValue(new Error('network down'));
 
     const user = userEvent.setup();
     await submitLookup(user);
@@ -131,12 +120,14 @@ describe('ReputationLookup', () => {
 
     respondWith(apiPayload);
     await user.click(screen.getByRole('button', { name: /retry api/i }));
-    await waitFor(() => expect(screen.queryByText(/network down/i)).not.toBeInTheDocument());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(screen.queryByText(/network down/i)).not.toBeInTheDocument();
   });
 
   it('shows an API error and retry control for non-2xx', async () => {
-    fetchMock.mockResolvedValueOnce(fail(404, 'Request failed (404)'));
+    fetchMock.mockReset();
     mockReadOnChain.mockResolvedValue({ ...apiPayload, address: validAddress });
+    respondWith({}, 404);
 
     const user = userEvent.setup();
     await submitLookup(user);
@@ -147,7 +138,8 @@ describe('ReputationLookup', () => {
 
     respondWith(apiPayload);
     await user.click(screen.getByRole('button', { name: /retry api/i }));
-    await waitFor(() => expect(screen.queryByText(/Request failed \(404\)/i)).not.toBeInTheDocument());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/Request failed \(404\)/i)).not.toBeInTheDocument();
   });
 
   it('renders without crashing when the API returns empty data', async () => {
@@ -179,7 +171,9 @@ describe('ReputationLookup', () => {
     const user = userEvent.setup();
     await submitLookup(user, 'not-an-address');
 
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/valid Stellar public address/i));
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(/valid Stellar public address/i),
+    );
     expect(screen.getByLabelText('Freelancer address')).toHaveAttribute('aria-invalid', 'true');
     expect(fetchMock).not.toHaveBeenCalled();
     expect(mockReadOnChain).not.toHaveBeenCalled();
